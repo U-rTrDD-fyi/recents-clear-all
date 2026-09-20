@@ -1,0 +1,5 @@
+build/
+chk/
+*.apk
+*.jks
+KEYSTORE-PASSWORD.txt

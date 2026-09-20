@@ -1,0 +1,142 @@
+name: Release CI
+
+on:
+  push:
+    branches: [ main ]
+    # version lives in the manifest, so that is the trigger
+    paths: [ AndroidManifest.xml ]
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Mark the release as a pre-release"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # secrets cannot be referenced from a step-level `if:`, so fold it to a
+      # boolean here, where they can be
+      HAS_LSPOSED_TOKEN: ${{ secrets.LSPOSED_RELEASE_TOKEN != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Fetch Xposed API
+        # not on Maven Central; api.xposed.info is the canonical host
+        run: curl -fsSL -o xposed-api.jar
+             https://api.xposed.info/de/robv/android/xposed/api/82/api-82.jar
+
+      - name: Read version from manifest
+        id: ver
+        run: |
+          VC=$(grep -oP 'versionCode="\K[0-9]+' AndroidManifest.xml)
+          VN=$(grep -oP 'versionName="\K[^"]+' AndroidManifest.xml)
+          PKG=$(grep -oP 'package="\K[^"]+' AndroidManifest.xml)
+          # the LSPosed index parses latestRelease as versionCode-versionName
+          echo "tag=${VC}-${VN}"   >> "$GITHUB_OUTPUT"
+          echo "pkg=${PKG}"        >> "$GITHUB_OUTPUT"
+          echo "apk=RecentsClearAll-${VN}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Decode keystore
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::KEYSTORE secret is not set" && exit 1
+          fi
+          echo "$KEYSTORE" | base64 --decode > "${{ github.workspace }}/key.jks"
+
+      - name: Build
+        env:
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          ALIAS: ${{ secrets.KEY_ALIAS }}
+          OUT: ${{ steps.ver.outputs.apk }}
+        run: |
+          export AJ="$ANDROID_HOME/platforms/android-36/android.jar"
+          export XP="$GITHUB_WORKSPACE/xposed-api.jar"
+          export BT="$ANDROID_HOME/build-tools/36.0.0"
+          export KS="$GITHUB_WORKSPACE/key.jks"
+          chmod +x build.sh && ./build.sh
+
+      - name: Sanity-check the APK
+        run: |
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          APK="${{ steps.ver.outputs.apk }}"
+          "$BT/apksigner" verify --print-certs "$APK"
+          # the entry class in assets/xposed_init must exist in the dex, or the
+          # module silently loads and hooks nothing
+          ENTRY=$(unzip -p "$APK" assets/xposed_init | tr -d '\r\n')
+          echo "entry: $ENTRY"
+          unzip -p "$APK" classes.dex > classes.dex
+          strings -a classes.dex | grep -qF "$(echo "$ENTRY" | tr '.' '/')" \
+            || { echo "::error::entry class $ENTRY missing from dex"; exit 1; }
+          # dex must be stored, not deflated: Android mmaps it out of the APK
+          unzip -v "$APK" classes.dex | grep -q ' Stored ' \
+            || { echo "::error::classes.dex is compressed"; exit 1; }
+          rm -f classes.dex
+
+      - name: Build changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        with:
+          mode: "HYBRID"
+          configurationJson: |
+            {
+              "categories": [
+                { "title": "## 🚀 Features", "labels": ["feat"] },
+                { "title": "## 🐛 Fixes", "labels": ["fix", "perf", "refactor", "revert"] },
+                { "title": "## 💬 Other", "labels": ["build", "chore", "ci", "docs"] }
+              ],
+              "label_extractor": [
+                {
+                  "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert)(\\([^()]+\\))?:(.|\n)*",
+                  "target": "$1"
+                }
+              ]
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release here
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.ver.outputs.tag }}
+          artifacts: ${{ steps.ver.outputs.apk }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          prerelease: ${{ inputs.prerelease || false }}
+          allowUpdates: true
+          updateOnlyUnreleased: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # This is the one the store actually reads: modules.lsposed.org indexes
+      # releases under Xposed-Modules-Repo/<package name>. Skipped until the
+      # token exists, so the build still works before the repo is approved.
+      - name: Mirror to Xposed-Modules-Repo
+        if: env.HAS_LSPOSED_TOKEN == 'true' 
+        uses: ncipollo/release-action@v1
+        with:
+          owner: Xposed-Modules-Repo
+          repo: ${{ steps.ver.outputs.pkg }}
+          tag: ${{ steps.ver.outputs.tag }}
+          artifacts: ${{ steps.ver.outputs.apk }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          prerelease: ${{ inputs.prerelease || false }}
+          allowUpdates: true
+          updateOnlyUnreleased: true
+          token: ${{ secrets.LSPOSED_RELEASE_TOKEN }}
