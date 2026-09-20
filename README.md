@@ -86,6 +86,11 @@ The Xposed API jar is `de.robv.android.xposed:api:82`, available from
 `https://api.xposed.info/`. Note that `classes.dex` is added **stored, not deflated** —
 Android mmaps the dex straight out of the APK.
 
+## Licence
+
+GPL-3.0, matching [PixelXpert](https://github.com/Codecity001/PixelXpert), whose
+`ClearAllButtonMod` this follows.
+
 ## Credit
 
 The approach follows [PixelXpert](https://github.com/Codecity001/PixelXpert)'s
