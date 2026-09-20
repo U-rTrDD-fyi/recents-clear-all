@@ -140,8 +140,10 @@ jobs:
           artifacts: ${{ steps.ver.outputs.apk }}
           body: ${{ steps.changelog.outputs.changelog || format('Release {0}', steps.ver.outputs.tag) }}
           prerelease: ${{ inputs.prerelease || false }}
+          # deliberately no updateOnlyUnreleased: it turns a re-run of an
+          # already-published version into a hard error, which strands the job
+          # whenever a later step fails and needs retrying
           allowUpdates: true
-          updateOnlyUnreleased: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # This is the one the store actually reads: modules.lsposed.org indexes
@@ -158,5 +160,4 @@ jobs:
           body: ${{ steps.changelog.outputs.changelog || format('Release {0}', steps.ver.outputs.tag) }}
           prerelease: ${{ inputs.prerelease || false }}
           allowUpdates: true
-          updateOnlyUnreleased: true
           token: ${{ secrets.LSPOSED_RELEASE_TOKEN }}
