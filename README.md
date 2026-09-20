@@ -10,6 +10,12 @@ second one that is on screen the moment Overview opens.
 It does that one thing and nothing else, so it will not collide with launcher or system-UI
 tweaks your ROM already applies.
 
+## Screenshots
+
+| Unfolded — floating beside the carousel | Folded — in the Screenshot / Select row |
+|---|---|
+| <img src="https://raw.githubusercontent.com/U-rTrDD-fyi/recents-clear-all/main/screenshots/unfolded.png" width="420"> | <img src="https://raw.githubusercontent.com/U-rTrDD-fyi/recents-clear-all/main/screenshots/folded.png" width="220"> |
+
 ## Where the button goes
 
 It places itself differently depending on the panel, chosen from the screen configuration
