@@ -15,6 +15,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # new repos default GITHUB_TOKEN to read-only, which 403s on create-release
+    permissions:
+      contents: write
     env:
       # secrets cannot be referenced from a step-level `if:`, so fold it to a
       # boolean here, where they can be
