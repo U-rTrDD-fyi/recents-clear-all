@@ -31,11 +31,26 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+      # The runner already ships the Android SDK. android-actions/setup-android
+      # is not used: it runs `sdkmanager tools`, and that package no longer
+      # exists, so the action fails outright. Versions are discovered rather
+      # than pinned, so a runner image bump cannot break the build.
+      - name: Prepare Android SDK
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKM=$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)
+          if [ -n "$SDKM" ]; then
+            yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+            "$SDKM" --install "platforms;android-36" "build-tools;36.0.0" >/dev/null 2>&1 || true
+          fi
+          AJ=$(ls "$SDK"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)
+          BT=$(ls -d "$SDK"/build-tools/*/ 2>/dev/null | sort -V | tail -1)
+          [ -n "$AJ" ] || { echo "::error::no android.jar found under $SDK"; exit 1; }
+          [ -n "$BT" ] || { echo "::error::no build-tools found under $SDK"; exit 1; }
+          echo "AJ=$AJ"        >> "$GITHUB_ENV"
+          echo "BT=${BT%/}"    >> "$GITHUB_ENV"
+          echo "using android.jar: $AJ"
+          echo "using build-tools: ${BT%/}"
 
       - name: Fetch Xposed API
         # not on Maven Central; api.xposed.info is the canonical host
@@ -68,15 +83,12 @@ jobs:
           ALIAS: ${{ secrets.KEY_ALIAS }}
           OUT: ${{ steps.ver.outputs.apk }}
         run: |
-          export AJ="$ANDROID_HOME/platforms/android-36/android.jar"
           export XP="$GITHUB_WORKSPACE/xposed-api.jar"
-          export BT="$ANDROID_HOME/build-tools/36.0.0"
           export KS="$GITHUB_WORKSPACE/key.jks"
           chmod +x build.sh && ./build.sh
 
       - name: Sanity-check the APK
         run: |
-          BT="$ANDROID_HOME/build-tools/36.0.0"
           APK="${{ steps.ver.outputs.apk }}"
           "$BT/apksigner" verify --print-certs "$APK"
           # the entry class in assets/xposed_init must exist in the dex, or the
